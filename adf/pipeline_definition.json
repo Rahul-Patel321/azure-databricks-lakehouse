@@ -1,0 +1,64 @@
+{
+  "name": "SalesLakehouseIngestionPipeline",
+  "properties": {
+    "description": "Copies raw sales files into ADLS Gen2, then triggers the Bronze/Silver/Gold Databricks notebooks in sequence.",
+    "activities": [
+      {
+        "name": "CopyRawSalesFiles",
+        "type": "Copy",
+        "typeProperties": {
+          "source": { "type": "DelimitedTextSource" },
+          "sink": { "type": "DelimitedTextSink" }
+        },
+        "inputs": [{ "referenceName": "SourceSalesDataset", "type": "DatasetReference" }],
+        "outputs": [{ "referenceName": "RawADLSDataset", "type": "DatasetReference" }]
+      },
+      {
+        "name": "RunBronzeIngestionNotebook",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          { "activity": "CopyRawSalesFiles", "dependencyConditions": ["Succeeded"] }
+        ],
+        "typeProperties": {
+          "notebookPath": "/Repos/lakehouse/01_bronze_ingestion"
+        },
+        "linkedServiceName": { "referenceName": "AzureDatabricks_LinkedService", "type": "LinkedServiceReference" }
+      },
+      {
+        "name": "RunSilverTransformationNotebook",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          { "activity": "RunBronzeIngestionNotebook", "dependencyConditions": ["Succeeded"] }
+        ],
+        "typeProperties": {
+          "notebookPath": "/Repos/lakehouse/02_silver_transformation"
+        },
+        "linkedServiceName": { "referenceName": "AzureDatabricks_LinkedService", "type": "LinkedServiceReference" }
+      },
+      {
+        "name": "RunGoldAggregationNotebook",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          { "activity": "RunSilverTransformationNotebook", "dependencyConditions": ["Succeeded"] }
+        ],
+        "typeProperties": {
+          "notebookPath": "/Repos/lakehouse/03_gold_aggregation"
+        },
+        "linkedServiceName": { "referenceName": "AzureDatabricks_LinkedService", "type": "LinkedServiceReference" }
+      },
+      {
+        "name": "NotifyOnFailure",
+        "type": "WebActivity",
+        "dependsOn": [
+          { "activity": "RunGoldAggregationNotebook", "dependencyConditions": ["Failed"] }
+        ],
+        "typeProperties": {
+          "url": "https://<logic-app-or-webhook-endpoint>",
+          "method": "POST",
+          "body": { "message": "SalesLakehouseIngestionPipeline failed. Check ADF run history." }
+        }
+      }
+    ],
+    "annotations": ["lakehouse", "bronze-silver-gold", "sales"]
+  }
+}
